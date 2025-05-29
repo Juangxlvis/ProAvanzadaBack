@@ -307,4 +307,59 @@ public class AlumnoServiceImp implements AlumnoService {
             throw new RuntimeException("Error interno del servidor al procesar la solicitud para iniciar el examen.", e);
         }
     }
+
+    @Override
+    @Transactional
+    public RegistrarRespuestaResponseDTO registrarRespuestaAlumno(
+            Integer idPresentacionExamen, Integer idAlumno, RegistrarRespuestaRequestDTO respuestaData) {
+
+        StoredProcedureQuery storedProcedure = entityManager.createStoredProcedureQuery("registrar_respuesta_alumno");
+
+        storedProcedure.registerStoredProcedureParameter("p_id_presentacion_examen_in", Integer.class, ParameterMode.IN);
+        storedProcedure.registerStoredProcedureParameter("p_id_pregunta_in", Integer.class, ParameterMode.IN);
+        storedProcedure.registerStoredProcedureParameter("p_id_respuesta_seleccionada_in", Integer.class, ParameterMode.IN);
+        storedProcedure.registerStoredProcedureParameter("p_id_alumno_in", Integer.class, ParameterMode.IN);
+
+        storedProcedure.registerStoredProcedureParameter("p_id_presentacion_pregunta_out", Integer.class, ParameterMode.OUT);
+        storedProcedure.registerStoredProcedureParameter("p_respuesta_fue_correcta_out", Character.class, ParameterMode.OUT); // CHAR(1)
+        storedProcedure.registerStoredProcedureParameter("p_mensaje_out", String.class, ParameterMode.OUT);
+        storedProcedure.registerStoredProcedureParameter("p_error_out", String.class, ParameterMode.OUT);
+
+        storedProcedure.setParameter("p_id_presentacion_examen_in", idPresentacionExamen);
+        storedProcedure.setParameter("p_id_pregunta_in", respuestaData.idPregunta());
+        storedProcedure.setParameter("p_id_respuesta_seleccionada_in", respuestaData.idRespuestaSeleccionada());
+        storedProcedure.setParameter("p_id_alumno_in", idAlumno);
+
+        try {
+            storedProcedure.execute();
+
+            String errorOut = (String) storedProcedure.getOutputParameterValue("p_error_out");
+            if (errorOut != null && !errorOut.isBlank()) {
+                throw new RuntimeException(errorOut);
+            }
+
+            String mensajeOut = (String) storedProcedure.getOutputParameterValue("p_mensaje_out");
+            Integer idPresentacionPregunta = (Integer) storedProcedure.getOutputParameterValue("p_id_presentacion_pregunta_out");
+            Character respuestaCorrectaChar = (Character) storedProcedure.getOutputParameterValue("p_respuesta_fue_correcta_out");
+
+            if (mensajeOut == null || (mensajeOut.toLowerCase().startsWith("error:") && !mensajeOut.toLowerCase().contains("ya existe una respuesta"))) {
+                // El chequeo de "ya existe" es un caso especial que podría no ser un error fatal si se permite actualizar.
+                // Pero si es otro error, o mensaje nulo, es un problema.
+                throw new RuntimeException(mensajeOut != null ? mensajeOut : "Error desconocido al registrar la respuesta.");
+            }
+
+            Boolean fueCorrecta = null;
+            if (respuestaCorrectaChar != null) {
+                fueCorrecta = (respuestaCorrectaChar == 'T' || respuestaCorrectaChar == 'V');
+            }
+
+            return new RegistrarRespuestaResponseDTO(idPresentacionPregunta, mensajeOut, fueCorrecta);
+
+        } catch (RuntimeException re) {
+            throw re;
+        } catch (Exception e) {
+            e.printStackTrace();
+            throw new RuntimeException("Error interno del servidor al registrar la respuesta: " + e.getMessage(), e);
+        }
+    }
 }

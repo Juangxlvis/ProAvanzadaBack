@@ -56,43 +56,22 @@ public class AlumnoController {
         return ResponseEntity.ok().body(new MensajeDTO<>(false, "", alumnoService.obtenerExamenesHechos(id, id_grupo)));
     }
 
-    @PostMapping("/iniciar") // Ejemplo de endpoint: POST /api/examenes/iniciar
+    @PostMapping("/{idAlumno}/examenes/iniciar") // Ejemplo: POST /api/alumnos/1/examenes/iniciar
     public ResponseEntity<MensajeDTO<ExamenParaPresentarDTO>> iniciarExamen(
+            @PathVariable Integer idAlumno, // idAlumno ahora es un PathVariable
             @RequestBody IniciarExamenRequestDTO requestDTO,
-            // Authentication authentication, // Descomentar si usas Spring Security
             HttpServletRequest httpRequest) {
 
-        Integer idAlumno;
         String ipCliente = httpRequest.getRemoteAddr();
 
-        // --- OBTENCIÓN DEL ID DEL ALUMNO ---
-        // En un entorno de producción, obtendrías el ID del alumno del usuario autenticado.
-        // Ejemplo con Spring Security (si 'name' es el ID del alumno):
-        /*
-        if (authentication == null || !authentication.isAuthenticated()) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                                 .body(new MensajeDTO<>(true, "Usuario no autenticado.", null));
-        }
-        UserDetails userDetails = (UserDetails) authentication.getPrincipal();
-        // Aquí necesitarías una forma de convertir userDetails.getUsername() o un claim del token a Integer idAlumno.
-        // Esto es solo un placeholder, adapta según tu implementación de seguridad.
-        try {
-            idAlumno = Integer.parseInt(userDetails.getUsername());
-        } catch (NumberFormatException e) {
-             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                                  .body(new MensajeDTO<>(true, "ID de usuario inválido en el token.", null));
-        }
-        */
-
-        // Para propósitos de este ejemplo, si no tienes seguridad configurada aún,
-        // podrías pasarlo en el DTO de solicitud o como path variable (menos seguro para este caso).
-        // Aquí simularé un ID de alumno. ¡DEBES CAMBIAR ESTO!
-        idAlumno = 1; // !!! EJEMPLO: REEMPLAZA CON TU LÓGICA REAL PARA OBTENER EL ID DEL ALUMNO !!!
         if (requestDTO.idExamen() == null) {
             return ResponseEntity.badRequest()
-                    .body(new MensajeDTO<>(true, "El idExamen es requerido.", null));
+                    .body(new MensajeDTO<>(true, "El idExamen es requerido en el cuerpo de la solicitud.", null));
         }
-        // --- FIN OBTENCIÓN DEL ID DEL ALUMNO ---
+        if (idAlumno == null) { // Aunque @PathVariable lo haría fallar antes si no se provee
+            return ResponseEntity.badRequest()
+                    .body(new MensajeDTO<>(true, "El idAlumno es requerido en la ruta.", null));
+        }
 
 
         try {
@@ -103,16 +82,51 @@ public class AlumnoController {
             );
             return ResponseEntity.ok().body(new MensajeDTO<>(false, "Examen listo para presentar.", examenParaPresentar));
         } catch (RuntimeException e) {
-            // Captura excepciones de lógica de negocio (ej. "Error: El examen no existe.")
-            // o errores durante la ejecución del servicio.
             System.err.println("Error en ExamenController al llamar a iniciarYCargarExamen: " + e.getMessage());
-            // Podrías querer loggear e.printStackTrace() en un log real
             return ResponseEntity.badRequest().body(new MensajeDTO<>(true, e.getMessage(), null));
         } catch (Exception e) {
-            // Captura cualquier otra excepción inesperada.
             System.err.println("Error inesperado en ExamenController: " + e.getMessage());
-            e.printStackTrace(); // Loguear el stack trace completo
+            e.printStackTrace();
             return ResponseEntity.internalServerError().body(new MensajeDTO<>(true, "Error interno del servidor al intentar iniciar el examen.", null));
+        }
+    }
+
+
+    @PostMapping("/{idPresentacionExamen}/preguntas/responder")
+    public ResponseEntity<MensajeDTO<RegistrarRespuestaResponseDTO>> responderPregunta(
+            @PathVariable Integer idPresentacionExamen,
+            @RequestBody RegistrarRespuestaRequestDTO respuestaDTO
+            // ,Principal principal // Para obtener el idAlumno del usuario autenticado
+    ) {
+
+        // --- OBTENER ID ALUMNO ---
+        // En un sistema real, obtendrías el ID del alumno del contexto de seguridad.
+        Integer idAlumno = 1; // !!! EJEMPLO: REEMPLAZA CON TU LÓGICA REAL PARA OBTENER ID_ALUMNO !!!
+        // --- FIN OBTENER ID ALUMNO ---
+
+        if (idPresentacionExamen == null || respuestaDTO == null || respuestaDTO.idPregunta() == null) {
+            return ResponseEntity.badRequest()
+                    .body(new MensajeDTO<>(true, "Faltan datos requeridos (ID Presentación, ID Pregunta).", null));
+        }
+        // Podrías añadir más validaciones para respuestaDTO.idRespuestaSeleccionada() si es mandatorio
+
+        try {
+            RegistrarRespuestaResponseDTO respuestaServicio = alumnoService.registrarRespuestaAlumno(
+                    idPresentacionExamen,
+                    idAlumno,
+                    respuestaDTO
+            );
+            // El mensaje del servicio ya indica éxito o error específico de PL/SQL
+            boolean esErrorLogico = respuestaServicio.mensaje() != null && respuestaServicio.mensaje().toLowerCase().startsWith("error:");
+
+            return ResponseEntity.status(esErrorLogico ? 400 : 200) // Bad Request si es error lógico, OK si no
+                    .body(new MensajeDTO<>(esErrorLogico, esErrorLogico ? respuestaServicio.mensaje() : "Respuesta procesada.", respuestaServicio));
+
+        } catch (RuntimeException e) { // Errores lanzados por el servicio
+            return ResponseEntity.badRequest().body(new MensajeDTO<>(true, e.getMessage(), null));
+        } catch (Exception e) { // Otros errores inesperados
+            e.printStackTrace();
+            return ResponseEntity.internalServerError().body(new MensajeDTO<>(true, "Error interno al registrar la respuesta.", null));
         }
     }
 }

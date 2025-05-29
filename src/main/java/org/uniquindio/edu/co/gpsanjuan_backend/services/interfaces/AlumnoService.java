@@ -34,5 +34,10 @@ public interface AlumnoService {
 
     ExamenParaPresentarDTO iniciarCargarExamenParaPresentar(Integer idAlumno, Integer idExamen, String ipCliente);
 
+    RegistrarRespuestaResponseDTO registrarRespuestaAlumno(
+            Integer idPresentacionExamen, // Viene de la presentación actual
+            Integer idAlumno,            // Para validación, del usuario autenticado
+            RegistrarRespuestaRequestDTO respuestaData
+    );
 
 }
