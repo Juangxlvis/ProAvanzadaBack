@@ -40,4 +40,10 @@ public interface AlumnoService {
             RegistrarRespuestaRequestDTO respuestaData
     );
 
+    FinalizarExamenResponseDTO finalizarPresentacionExamen(Integer idPresentacionExamen, Integer idAlumno);
+
+    CursoGruposDTO obtenerCursoConGruposParaUsuario(String idUsuario, String rol, Integer idCurso);
+
+    List<CursoConIdGrupoDTO> obtenerCursosAlumno(String id, String rol);
+
 }

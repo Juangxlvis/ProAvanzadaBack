@@ -12,7 +12,9 @@ import org.uniquindio.edu.co.gpsanjuan_backend.DTO.*;
 import org.uniquindio.edu.co.gpsanjuan_backend.services.interfaces.AlumnoService;
 
 import java.lang.reflect.Type;
+import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 @Service
@@ -360,6 +362,159 @@ public class AlumnoServiceImp implements AlumnoService {
         } catch (Exception e) {
             e.printStackTrace();
             throw new RuntimeException("Error interno del servidor al registrar la respuesta: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    @Transactional // Importante para la actualización del estado del examen
+    public FinalizarExamenResponseDTO finalizarPresentacionExamen(Integer idPresentacionExamen, Integer idAlumno) {
+        StoredProcedureQuery storedProcedure = entityManager.createStoredProcedureQuery("finalizar_presentacion_examen");
+
+        // Parámetros IN
+        storedProcedure.registerStoredProcedureParameter("p_id_presentacion_examen_in", Integer.class, ParameterMode.IN);
+        storedProcedure.registerStoredProcedureParameter("p_id_alumno_in", Integer.class, ParameterMode.IN);
+
+        // Parámetros OUT
+        storedProcedure.registerStoredProcedureParameter("p_mensaje_out", String.class, ParameterMode.OUT);
+        storedProcedure.registerStoredProcedureParameter("p_calificacion_final_out", BigDecimal.class, ParameterMode.OUT); // NUMBER de Oracle
+        storedProcedure.registerStoredProcedureParameter("p_error_out", String.class, ParameterMode.OUT);
+
+        // Establecer valores de parámetros IN
+        storedProcedure.setParameter("p_id_presentacion_examen_in", idPresentacionExamen);
+        storedProcedure.setParameter("p_id_alumno_in", idAlumno);
+
+        try {
+            storedProcedure.execute();
+
+            String mensajeOut = (String) storedProcedure.getOutputParameterValue("p_mensaje_out");
+            BigDecimal calificacionOut = (BigDecimal) storedProcedure.getOutputParameterValue("p_calificacion_final_out");
+            String errorOut = (String) storedProcedure.getOutputParameterValue("p_error_out");
+
+            // Verificar si el PL/SQL reportó un error de lógica de negocio
+            if (errorOut != null && !errorOut.isBlank()) {
+                System.err.println("Error desde PL/SQL (finalizar_presentacion_examen): " + errorOut);
+                throw new RuntimeException(errorOut);
+            }
+            // Doble chequeo por si p_error_out fue null pero p_mensaje_out indica error
+            if (mensajeOut == null || mensajeOut.toLowerCase().startsWith("error:")) {
+                System.err.println("Error o mensaje inesperado desde PL/SQL (finalizar_presentacion_examen): " + mensajeOut);
+                throw new RuntimeException(mensajeOut != null ? mensajeOut : "Error desconocido al finalizar el examen.");
+            }
+
+            String estadoPresentacion = "Finalizado";
+            if (calificacionOut != null) {
+                estadoPresentacion = "Calificado";
+            } else if (mensajeOut.toLowerCase().contains("calificación: pendiente")) {
+                estadoPresentacion = "Finalizado - Pendiente de Calificación";
+            }
+
+            return new FinalizarExamenResponseDTO(mensajeOut, calificacionOut, estadoPresentacion);
+
+        } catch (RuntimeException re) { // Re-lanzar excepciones ya formateadas (de lógica de negocio)
+            throw re;
+        } catch (Exception e) {
+            System.err.println("Excepción en Java al llamar a finalizar_presentacion_examen: " + e.getMessage());
+            e.printStackTrace(); // Loguear el stack trace completo
+            throw new RuntimeException("Error interno del servidor al procesar la finalización del examen.", e);
+        }
+    }
+
+    @Override
+    public CursoGruposDTO obtenerCursoConGruposParaUsuario(String idUsuario, String rol, Integer idCurso) {
+        StoredProcedureQuery storedProcedure = entityManager.createStoredProcedureQuery("get_curso_con_grupos_usuario");
+
+        storedProcedure.registerStoredProcedureParameter("p_id_usuario_in", String.class, ParameterMode.IN);
+        storedProcedure.registerStoredProcedureParameter("p_rol_in", String.class, ParameterMode.IN);
+        storedProcedure.registerStoredProcedureParameter("p_id_curso_seleccionado_in", Integer.class, ParameterMode.IN);
+        storedProcedure.registerStoredProcedureParameter("res_json_out", String.class, ParameterMode.OUT); // CLOB se mapea a String
+        storedProcedure.registerStoredProcedureParameter("p_error_out", String.class, ParameterMode.OUT);
+
+        storedProcedure.setParameter("p_id_usuario_in", idUsuario);
+        storedProcedure.setParameter("p_rol_in", rol);
+        storedProcedure.setParameter("p_id_curso_seleccionado_in", idCurso);
+
+        try {
+            storedProcedure.execute();
+
+            String errorOut = (String) storedProcedure.getOutputParameterValue("p_error_out");
+            if (errorOut != null && !errorOut.isBlank()) {
+                System.err.println("Error desde PL/SQL (get_curso_con_grupos_usuario): " + errorOut);
+                throw new RuntimeException(errorOut); // Lanza excepción para que el controlador la maneje
+            }
+
+            String jsonResult = (String) storedProcedure.getOutputParameterValue("res_json_out");
+            if (jsonResult == null || jsonResult.trim().isEmpty()) {
+                System.err.println("PL/SQL (get_curso_con_grupos_usuario) no devolvió JSON. Error PL/SQL: " + errorOut);
+                // Esto podría ocurrir si p_error_out se pobló y el JSON no se construyó.
+                // La excepción anterior ya debería haber sido lanzada.
+                throw new RuntimeException("No se recibieron detalles del curso y grupos desde la base de datos.");
+            }
+
+            GsonBuilder gsonBuilder = new GsonBuilder();
+            // Registrar adaptadores si CursoConGruposDTO o GrupoSimpleUsuarioDTO tuvieran tipos complejos como LocalDate
+            Gson gson = gsonBuilder.create();
+
+            return gson.fromJson(jsonResult, CursoGruposDTO.class);
+
+        } catch (RuntimeException re) {
+            throw re; // Re-lanzar excepciones de lógica de negocio
+        } catch (Exception e) {
+            System.err.println("Excepción en Java al llamar a get_curso_con_grupos_usuario: " + e.getMessage());
+            e.printStackTrace();
+            throw new RuntimeException("Error interno del servidor al obtener detalles del curso y grupos.", e);
+        }
+    }
+
+    @Override
+    public List<CursoConIdGrupoDTO> obtenerCursosAlumno(String id, String rol) { // Cambiado el tipo de retorno
+        StoredProcedureQuery storedProcedure = entityManager.createStoredProcedureQuery("GET_CURSOS_GRUPO_ALUMNO");
+
+        storedProcedure.registerStoredProcedureParameter("p_id_usuario_in", String.class, ParameterMode.IN);
+        storedProcedure.registerStoredProcedureParameter("p_rol_in", String.class, ParameterMode.IN);
+        storedProcedure.registerStoredProcedureParameter("res_json_out", String.class, ParameterMode.OUT);
+        storedProcedure.registerStoredProcedureParameter("p_error_out", String.class, ParameterMode.OUT);
+
+        storedProcedure.setParameter("p_id_usuario_in", id);
+        storedProcedure.setParameter("p_rol_in", rol);
+
+        try {
+            storedProcedure.execute();
+
+            String errorOut = (String) storedProcedure.getOutputParameterValue("p_error_out");
+            if (errorOut != null && !errorOut.isBlank()) {
+                System.err.println("Error desde PL/SQL (get_cursos_usuario): " + errorOut);
+                throw new RuntimeException(errorOut);
+            }
+
+            String jsonResult = (String) storedProcedure.getOutputParameterValue("res_json_out");
+
+            if (jsonResult == null || jsonResult.trim().isEmpty() ||
+                    (jsonResult.trim().startsWith("{") && jsonResult.toLowerCase().contains("\"error_exception\":"))) {
+                System.err.println("Respuesta vacía o error JSON desde PL/SQL (get_cursos_usuario). JSON: " + jsonResult);
+                if (jsonResult != null && jsonResult.trim().equals("[]") && (errorOut == null || errorOut.isBlank())) {
+                    return Collections.emptyList();
+                }
+                throw new RuntimeException("No se recibieron datos de cursos válidos desde la base de datos.");
+            }
+
+            GsonBuilder gsonBuilder = new GsonBuilder();
+            Gson gson = gsonBuilder.create();
+
+            Type listType = new TypeToken<List<CursoConIdGrupoDTO>>() {}.getType(); // Usar el nuevo DTO
+            List<CursoConIdGrupoDTO> cursos = gson.fromJson(jsonResult, listType);
+
+            if (cursos == null && (errorOut == null || errorOut.isBlank())) {
+                System.err.println("Deserialización de cursos resultó en NULL. JSON: " + jsonResult);
+                return Collections.emptyList();
+            }
+            return cursos;
+
+        } catch (RuntimeException re) {
+            throw re;
+        } catch (Exception e) {
+            System.err.println("Excepción en Java al llamar a get_cursos_usuario: " + e.getMessage());
+            e.printStackTrace();
+            throw new RuntimeException("Error interno del servidor al obtener la lista de cursos.", e);
         }
     }
 }

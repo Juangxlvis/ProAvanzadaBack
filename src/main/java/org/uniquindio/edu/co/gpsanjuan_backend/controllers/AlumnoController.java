@@ -40,9 +40,19 @@ public class AlumnoController {
         return ResponseEntity.ok().body(new MensajeDTO<>(false, "", alumnoService.obtenerNombre(id, rol)));
     }
 
-    @GetMapping("/cursos/{id}/{rol}")
-    public ResponseEntity<MensajeDTO<List<CursoSimpleDTO>>> obtenerCursos(@PathVariable String id, @PathVariable String rol) {
-        return ResponseEntity.ok().body(new MensajeDTO<>(false, "", alumnoService.obtenerCursos(id, rol)));
+    @GetMapping("/cursos/{id}/{rol}") 
+    public ResponseEntity<MensajeDTO<List<CursoConIdGrupoDTO>>> obtenerCursos(@PathVariable String id, @PathVariable String rol) {
+        try {
+            List<CursoConIdGrupoDTO> cursosConUnGrupo = alumnoService.obtenerCursosAlumno(id, rol);
+            return ResponseEntity.ok().body(new MensajeDTO<>(false, "Cursos y su grupo asociado obtenidos exitosamente.", cursosConUnGrupo));
+        } catch (RuntimeException e) {
+            System.err.println("Error en AlumnoController (obtenerCursos): " + e.getMessage());
+            return ResponseEntity.badRequest().body(new MensajeDTO<>(true, e.getMessage(), null));
+        } catch (Exception e) {
+            System.err.println("Error inesperado en AlumnoController (obtenerCursos): " + e.getMessage());
+            e.printStackTrace();
+            return ResponseEntity.internalServerError().body(new MensajeDTO<>(true, "Error interno al obtener los cursos.", null));
+        }
     }
 
 
@@ -127,6 +137,74 @@ public class AlumnoController {
         } catch (Exception e) { // Otros errores inesperados
             e.printStackTrace();
             return ResponseEntity.internalServerError().body(new MensajeDTO<>(true, "Error interno al registrar la respuesta.", null));
+        }
+    }
+
+
+    @PostMapping("/{idAlumno}/presentaciones-examen/{idPresentacionExamen}/finalizar")
+    public ResponseEntity<MensajeDTO<FinalizarExamenResponseDTO>> finalizarExamen(
+            @PathVariable Integer idAlumno,             // idAlumno ahora es un PathVariable
+            @PathVariable Integer idPresentacionExamen
+            // Ya no se necesita Authentication aquí si el idAlumno viene del path
+    ) {
+
+        // Ya no se necesita la obtención manual o codificada de idAlumno aquí
+        // porque viene como @PathVariable.
+
+        if (idAlumno == null) { // Aunque Spring lo manejaría si falta en la ruta
+            return ResponseEntity.badRequest()
+                    .body(new MensajeDTO<>(true, "El idAlumno es requerido en la ruta.", null));
+        }
+        if (idPresentacionExamen == null) {
+            return ResponseEntity.badRequest()
+                    .body(new MensajeDTO<>(true, "El idPresentacionExamen es requerido en la ruta.", null));
+        }
+
+        try {
+            FinalizarExamenResponseDTO resultadoFinalizacion = alumnoService.finalizarPresentacionExamen(idPresentacionExamen, idAlumno);
+
+            boolean esErrorLogico = resultadoFinalizacion.mensajeConfirmacion() != null &&
+                    resultadoFinalizacion.mensajeConfirmacion().toLowerCase().startsWith("error:");
+
+            return ResponseEntity.status(esErrorLogico ? 400 : 200)
+                    .body(new MensajeDTO<>(esErrorLogico, resultadoFinalizacion.mensajeConfirmacion(), resultadoFinalizacion));
+        } catch (RuntimeException e) {
+            System.err.println("Error en PresentacionExamenController al llamar a finalizarExamen: " + e.getMessage());
+            return ResponseEntity.badRequest().body(new MensajeDTO<>(true, e.getMessage(), null));
+        } catch (Exception e) {
+            System.err.println("Error inesperado en PresentacionExamenController (finalizarExamen): " + e.getMessage());
+            e.printStackTrace();
+            return ResponseEntity.internalServerError().body(new MensajeDTO<>(true, "Error interno del servidor al intentar finalizar el examen.", null));
+        }
+    }
+
+    @GetMapping("/{idCurso}/detalles-con-grupos")
+    public ResponseEntity<MensajeDTO<CursoGruposDTO>> obtenerDetallesCursoConGrupos(
+            @PathVariable Integer idCurso,
+            @RequestParam String idUsuario, // O obtenerlo del token/sesión
+            @RequestParam String rol        // O obtenerlo del token/sesión
+            // Principal principal // Alternativa para obtener idUsuario y rol
+    ) {
+
+        // Lógica para obtener idUsuario y rol si no vienen como @RequestParam:
+        // String idUsuarioAuth = principal.getName(); // Ejemplo
+        // String rolAuth = ... // Lógica para obtener el rol del usuario autenticado
+
+        if (idUsuario == null || idUsuario.isBlank() || rol == null || rol.isBlank() || idCurso == null) {
+            return ResponseEntity.badRequest()
+                    .body(new MensajeDTO<>(true, "Los parámetros idUsuario, rol e idCurso son requeridos.", null));
+        }
+
+        try {
+            CursoGruposDTO cursoGrupos = alumnoService.obtenerCursoConGruposParaUsuario(idUsuario, rol, idCurso);
+            return ResponseEntity.ok().body(new MensajeDTO<>(false, "Detalles del curso y grupos obtenidos exitosamente.", cursoGrupos));
+        } catch (RuntimeException e) {
+            System.err.println("Error en CursoController (obtenerDetallesCursoConGrupos): " + e.getMessage());
+            return ResponseEntity.badRequest().body(new MensajeDTO<>(true, e.getMessage(), null));
+        } catch (Exception e) {
+            System.err.println("Error inesperado en CursoController (obtenerDetallesCursoConGrupos): " + e.getMessage());
+            e.printStackTrace();
+            return ResponseEntity.internalServerError().body(new MensajeDTO<>(true, "Error interno al obtener detalles del curso.", null));
         }
     }
 }
